@@ -1,64 +1,47 @@
 @mode(host.dual)
 
 from debug.assert import (expect, expectEq);
-from cli.args import (parse_args, DEFAULT_GREETING);
+from cli.args import (parse_args, match_long);
 
-func test_no_arguments(): void {
+func test_defaults(): void {
     let none: list[string] = [];
     let opts = parse_args(none).unwrap();
-    expectEq(opts.command, "", "no command");
     expectEq(opts.operands.len(), 0, "no operands");
-    expectEq(opts.greeting, DEFAULT_GREETING, "default greeting");
-    expect(!opts.help and !opts.version and !opts.verbose and !opts.shout, "no flags set");
+    expect(!opts.force and !opts.recursive and !opts.dir and !opts.verbose, "no flags");
+    expect(opts.preserve_root, "--preserve-root is the default");
 }
 
-func test_command_and_operands(): void {
-    let opts = parse_args(["hello", "Ann"]).unwrap();
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands.len(), 1, "one operand");
-    expectEq(opts.operands[0], "Ann", "operand");
+func test_short_options(): void {
+    let opts = parse_args(["-rfdv", "x"]).unwrap();
+    expect(opts.recursive and opts.force and opts.dir and opts.verbose, "-r -f -d -v");
+    expect(parse_args(["-R"]).unwrap().recursive, "-R");
 }
 
-func test_flags_anywhere(): void {
-    let opts = parse_args(["-v", "hello", "--shout", "Ann"]).unwrap();
-    expect(opts.verbose, "verbose");
-    expect(opts.shout, "shout");
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands[0], "Ann", "operand");
+func test_long_options(): void {
+    let opts = parse_args(["--force", "--recursive", "--dir", "--verbose"]).unwrap();
+    expect(opts.force and opts.recursive and opts.dir and opts.verbose, "long forms");
+    expectEq(match_long("rec").unwrap(), "recursive", "prefix");
+    expectEq(match_long("no").unwrap(), "no-preserve-root", "--no");
 }
 
-func test_help_and_version(): void {
-    expect(parse_args(["--help"]).unwrap().help, "--help");
-    expect(parse_args(["-h"]).unwrap().help, "-h");
-    expect(parse_args(["--version"]).unwrap().version, "--version");
-    expect(parse_args(["-V"]).unwrap().version, "-V");
+func test_preserve_root_options(): void {
+    expect(!parse_args(["--no-preserve-root"]).unwrap().preserve_root, "--no-preserve-root");
+    expect(parse_args(["--no-preserve-root", "--preserve-root"]).unwrap().preserve_root, "last wins");
+    expect(parse_args(["--no-preserve-root", "--preserve-root=all"]).unwrap().preserve_root, "=all");
+    expectEq(parse_args(["--preserve-root=x"]).unwrap_err(), "unrecognized --preserve-root argument: 'x'", "=x");
 }
 
-func test_value_option_forms(): void {
-    expectEq(parse_args(["-g", "Hi"]).unwrap().greeting, "Hi", "-g VALUE");
-    expectEq(parse_args(["--greeting", "Hi"]).unwrap().greeting, "Hi", "--greeting VALUE");
-    expectEq(parse_args(["--greeting=a=b"]).unwrap().greeting, "a=b", "--greeting=VALUE keeps '='");
+func test_operands_and_double_dash(): void {
+    let opts = parse_args(["a", "-v", "b"]).unwrap();
+    expect(opts.verbose, "options anywhere");
+    expectEq(opts.operands.len(), 2, "two operands");
+    let literal = parse_args(["--", "-f"]).unwrap();
+    expect(!literal.force, "-f after -- is a name");
+    expectEq(literal.operands[0], "-f", "operand");
 }
 
-func test_double_dash_ends_options(): void {
-    let opts = parse_args(["hello", "--", "--shout"]).unwrap();
-    expect(!opts.shout, "--shout after -- is an operand");
-    expectEq(opts.operands[0], "--shout", "operand");
-}
-
-func test_lone_dash_is_operand(): void {
-    let opts = parse_args(["hello", "-"]).unwrap();
-    expectEq(opts.operands[0], "-", "operand");
-}
-
-func test_unknown_option(): void {
-    expectEq(parse_args(["--nope"]).unwrap_err(), "unknown option '--nope'", "error message");
-}
-
-func test_missing_value(): void {
-    expectEq(parse_args(["-g"]).unwrap_err(), "option '-g' requires a value", "error message");
-}
-
-func test_flag_with_value(): void {
-    expectEq(parse_args(["--shout=1"]).unwrap_err(), "option '--shout' does not take a value", "error message");
+func test_errors(): void {
+    expectEq(parse_args(["-i", "a"]).unwrap_err(), "invalid option -- 'i'", "-i is not supported");
+    expectEq(parse_args(["--bogus"]).unwrap_err(), "unrecognized option '--bogus'", "unknown");
+    expectEq(parse_args(["--force=1"]).unwrap_err(), "option '--force' doesn't allow an argument", "argument");
 }

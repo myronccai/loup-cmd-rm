@@ -1,0 +1,73 @@
+@mode(host.dual)
+
+# The operand guards, with "is it the root directory?" given directly, and
+# is_root_dir itself (which only looks, never deletes).
+
+from debug.assert import (expect, expectEq);
+from cli.args import (parse_args);
+from commands.safety import (last_component, is_dot_or_dotdot, refusal, dot_operand_error);
+from commands.fsinfo import (is_root_dir, names_key, absolute, entry_present);
+
+func test_last_component(): void {
+    expectEq(last_component("a/b"), "b", "plain");
+    expectEq(last_component("a/b//"), "b", "trailing slashes");
+    expectEq(last_component("d/.."), "..", "dot-dot");
+    expectEq(last_component("/"), "", "root");
+    expectEq(last_component("x"), "x", "no slash");
+}
+
+func test_dot_names(): void {
+    expect(is_dot_or_dotdot(".") and is_dot_or_dotdot(".."), ". and ..");
+    expect(!is_dot_or_dotdot("...") and !is_dot_or_dotdot(".h"), "other dot names");
+}
+
+func test_refuses_dots_with_r(): void {
+    let r = parse_args(["-r"]).unwrap();
+    for (op in [".", "..", "./", "d/..", "d/.", "a/b/../"]) {
+        let msgs = refusal(op, r, false);
+        expectEq(msgs.len(), 1, op);
+        expect(msgs[0].startsWith("refusing to remove '.' or '..' directory: skipping"), op);
+    }
+    expectEq(refusal("..", parse_args(["-d"]).unwrap(), false).len(), 0, "only with -r");
+}
+
+func test_refuses_root_with_r(): void {
+    let r = parse_args(["-r"]).unwrap();
+    let msgs = refusal("/", r, true);
+    expectEq(msgs[0], "it is dangerous to operate recursively on '/'", "/");
+    expectEq(msgs[1], "use --no-preserve-root to override this failsafe", "hint");
+    expectEq(refusal("link", r, true)[0], "it is dangerous to operate recursively on 'link' (same as '/')", "another name");
+    expectEq(refusal("/", parse_args(["-r", "--no-preserve-root"]).unwrap(), true).len(), 0, "override");
+    expectEq(refusal("/", parse_args(["-d"]).unwrap(), true).len(), 0, "only with -r");
+    expectEq(refusal("dir", r, false).len(), 0, "an ordinary directory");
+}
+
+func test_dot_operand_errors(): void {
+    expectEq(dot_operand_error(".", parse_args(["x"]).unwrap(), false), "cannot remove '.': Is a directory", "plain");
+    expectEq(dot_operand_error(".", parse_args(["-d"]).unwrap(), false), "cannot remove '.': Directory not empty", "-d");
+    expectEq(dot_operand_error("..", parse_args(["-d"]).unwrap(), true), "cannot remove '..': Invalid argument", "-d empty");
+}
+
+func test_root_detection(): void {
+    let root_key = names_key("/");
+    expect(is_root_dir("/", "", root_key), "/");
+    expect(is_root_dir("//", "", root_key), "//");
+    expect(is_root_dir("/tmp/..", "", root_key), "/tmp/..");
+    expect(is_root_dir("../../../../../../../../../../../../../../..", "/a/b", root_key), "enough .. from /a/b");
+    expect(!is_root_dir("/tmp", "", root_key), "/tmp");
+    expect(!is_root_dir("tests", "", root_key), "a relative directory");
+    expect(!is_root_dir("nope", "", root_key), "a missing name");
+}
+
+func test_absolute(): void {
+    expectEq(absolute("x/../y", "/w"), "/w/y", "relative");
+    expectEq(absolute("/x/./y/", "/w"), "/x/y", "absolute");
+}
+
+func test_entry_present(): void {
+    expect(entry_present("tests"), "a directory");
+    expect(entry_present("tests/"), "with a slash");
+    expect(entry_present("README.md"), "a file");
+    expect(!entry_present("README.md/"), "a file with a slash");
+    expect(!entry_present("no-such-name"), "missing");
+}

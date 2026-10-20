@@ -1,0 +1,130 @@
+@mode(host.dual)
+
+# What rm can find out about a path with io.fs, which has no stat() or
+# lstat(): `isDir`, `isFile` and `exists` follow symbolic links, and
+# `listDir` lists names. rm must never follow a link into a directory it was
+# not asked to remove, so:
+#
+# - A dangling symbolic link makes `exists` false although the directory
+#   entry is there; `entry_present` looks the name up in its directory.
+# - A symbolic link to a directory looks like the directory. The kernel
+#   resolves `link/..` to the parent of the link's target, so for a real
+#   directory `dir/..` lists the same names as the directory that contains
+#   `dir`, and for a link it (almost always) does not: `is_real_dir`.
+# - The root directory is the one directory whose `..` is itself:
+#   `is_root_dir`.
+#
+# The native build's io.fs never throws (a missing directory lists as empty);
+# the Stage0 interpreter used by `make test` throws IoError. Both are handled.
+
+from io.fs import (exists, isDir, listDir);
+from io.path import (basename, dirname, isAbsolute, normalize);
+
+# `dir/name`, without doubling a trailing slash (GNU's file_name_concat).
+pub func join_path(dir: string, name: string): string {
+    if (dir.endsWith("/")) {
+        return dir + name;
+    }
+    return dir + "/" + name;
+}
+
+# The names in a directory in byte order, or an empty list if it cannot be
+# read.
+pub func sorted_names(path: string): list[string] {
+    var out: list[string] = [];
+    try {
+        for (name in listDir(path)) {
+            out.push(name);
+        }
+    } catch (IoError as e) {
+        return out;
+    }
+    out.sort(func(a: string, b: string): int { return a.compareTo(b); });
+    return out;
+}
+
+# One string that is equal for two directories exactly when they hold the
+# same names (a name cannot contain `/`).
+pub func names_key(path: string): string {
+    return sorted_names(path).join("/");
+}
+
+# Whether there is a directory entry at `path`, even a dangling link. A name
+# with a trailing slash can only be a directory (or a link to one).
+pub func entry_present(path: string): bool {
+    if (path.endsWith("/")) {
+        return isDir(path);
+    }
+    if (exists(path)) {
+        return true;
+    }
+    let name = basename(path);
+    if (name == "" or name == "." or name == "..") {
+        return false;
+    }
+    return sorted_names(dirname(path)).contains(name);
+}
+
+# Whether the directory `path` is a real directory rather than a symbolic
+# link to one. A name with a trailing slash is taken as the directory it
+# leads to, as GNU rm does. A link to a sibling directory passes this test;
+# rm only meets one when unlinking it failed (see commands/rm.loup).
+pub func is_real_dir(path: string): bool {
+    if (!isDir(path)) {
+        return false;
+    }
+    if (path.endsWith("/")) {
+        return true;
+    }
+    return names_key(join_path(path, "..")) == names_key(dirname(path));
+}
+
+# `path` as an absolute, normalised path, given the working directory `cwd`
+# (normally $PWD; "" if unknown).
+pub func absolute(path: string, cwd: string): string {
+    if (isAbsolute(path) or cwd.len() == 0) {
+        return normalize(path);
+    }
+    return normalize(join_path(cwd, path));
+}
+
+# Whether `path` is the root directory: by name (`/`, `//`, `/..`, `a/../..`
+# from the right place), or by being a directory that lists like `/` and is
+# its own parent (a link to `/`, or a path through links). `root_key` is
+# names_key("/").
+pub func is_root_dir(path: string, cwd: string, root_key: string): bool {
+    if (absolute(path, cwd) == "/") {
+        return true;
+    }
+    if (!isDir(path)) {
+        return false;
+    }
+    let key = names_key(path);
+    return key == root_key and names_key(join_path(path, "..")) == key;
+}
+
+# Why `path` cannot be found: "Not a directory" when a component that should
+# be a directory is a file, as in `file/` or `file/x`.
+pub func missing_reason(path: string): string {
+    var cur = path;
+    while (cur.len() > 1 and cur.endsWith("/")) {
+        cur = cur.slice(0, cur.len() - 1);
+    }
+    if (cur != path and entry_present(cur)) {
+        return "Not a directory";
+    }
+    while (true) {
+        let parent = dirname(cur);
+        if (parent == cur) {
+            break;
+        }
+        if (exists(parent)) {
+            if (isDir(parent)) {
+                break;
+            }
+            return "Not a directory";
+        }
+        cur = parent;
+    }
+    return "No such file or directory";
+}

@@ -1,0 +1,24 @@
+@mode(host.dual)
+
+# Quoting of file names in error messages, as GNU coreutils does it (the
+# shell-escape-always style): 'name', or "name" when the name holds a single
+# quote and nothing a double-quoted shell string would expand, otherwise
+# single quotes with each ' written as '\''.
+
+const DOUBLE_QUOTE_SPECIALS: string = "\"$`\\";
+
+pub func quote(name: string): string {
+    if (name.index_of("'") < 0) {
+        return "'" + name + "'";
+    }
+    var plain = true;
+    for (ch in name) {
+        if (DOUBLE_QUOTE_SPECIALS.index_of(ch) >= 0) {
+            plain = false;
+        }
+    }
+    if (plain) {
+        return "\"" + name + "\"";
+    }
+    return "'" + name.split("'").join("'\\''") + "'";
+}

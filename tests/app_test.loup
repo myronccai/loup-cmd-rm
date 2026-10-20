@@ -3,23 +3,28 @@
 # Exit statuses of the whole command line. These tests print the program's
 # normal output and error messages.
 
-from debug.assert import (expectEq);
+from debug.assert import (expect, expectEq);
 from appinfo import (EXIT_OK, EXIT_USAGE);
-from cli.app import (run);
+from cli.app import (run, wants_try);
 
 func test_version_succeeds(): void {
     expectEq(run(["--version"]), EXIT_OK, "--version");
 }
 
-func test_hello_succeeds(): void {
-    expectEq(run(["hello", "tests"]), EXIT_OK, "hello NAME");
+func test_help_succeeds(): void {
+    expectEq(run(["--help"]), EXIT_OK, "--help");
 }
 
-func test_unknown_command_is_usage_error(): void {
-    expectEq(run(["bogus"]), EXIT_USAGE, "unknown command");
+func test_usage_errors_exit_1(): void {
+    expectEq(EXIT_USAGE, 1, "GNU rm uses 1 for usage errors");
+    expectEq(run(["-z"]), EXIT_USAGE, "-z");
 }
 
-func test_missing_command_is_usage_error(): void {
-    let none: list[string] = [];
-    expectEq(run(none), EXIT_USAGE, "no command");
+func test_force_without_operands_succeeds(): void {
+    expectEq(run(["-f"]), EXIT_OK, "-f");
+}
+
+func test_try_line(): void {
+    expect(wants_try("invalid option -- 'z'"), "invalid option");
+    expect(!wants_try("unrecognized --preserve-root argument: 'x'"), "no Try line");
 }

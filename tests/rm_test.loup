@@ -1,0 +1,75 @@
+@mode(host.dual)
+
+# Removals inside .temp/rm-unit/ (git-ignored; the tests run from the
+# repository root). Each test builds its own directory; nothing outside
+# .temp/rm-unit/ is ever named.
+
+from debug.assert import (expect, expectEq);
+from io.fs import (createDir, exists, isDir, isFile, removeDir, writeText);
+from cli.args import (parse_args);
+from commands.rm import (remove_operands);
+
+func fresh(name: string): string {
+    let dir = ".temp/rm-unit/" + name;
+    if (exists(dir)) {
+        removeDir(dir);
+    }
+    createDir(dir + "/d/sub");
+    createDir(dir + "/empty");
+    writeText(dir + "/a", "a\n");
+    writeText(dir + "/b", "b\n");
+    writeText(dir + "/d/x", "x\n");
+    writeText(dir + "/d/.h", "h\n");
+    writeText(dir + "/d/sub/y", "y\n");
+    return dir;
+}
+
+func test_remove_files_verbose(): void {
+    let dir = fresh("files");
+    let out = remove_operands(parse_args(["-v", dir + "/a", dir + "/b"]).unwrap(), "");
+    expectEq(out.status, 0, "status");
+    expect(!exists(dir + "/a") and !exists(dir + "/b"), "both gone");
+    expectEq(out.lines.join("|"), i"removed '{$ dir $}/a'|removed '{$ dir $}/b'", "-v lines");
+}
+
+func test_missing_and_force(): void {
+    let dir = fresh("missing");
+    let out = remove_operands(parse_args([dir + "/nope", dir + "/a"]).unwrap(), "");
+    expectEq(out.status, 1, "missing is an error");
+    expectEq(out.errors[0], i"cannot remove '{$ dir $}/nope': No such file or directory", "message");
+    expect(!exists(dir + "/a"), "the other operand is still removed");
+    let forced = remove_operands(parse_args(["-f", dir + "/nope"]).unwrap(), "");
+    expectEq(forced.status, 0, "-f");
+    expectEq(forced.errors.len(), 0, "-f is silent");
+}
+
+func test_directories_need_options(): void {
+    let dir = fresh("dirs");
+    let plain = remove_operands(parse_args([dir + "/d"]).unwrap(), "");
+    expectEq(plain.errors[0], i"cannot remove '{$ dir $}/d': Is a directory", "no -r");
+    expect(isDir(dir + "/d"), "kept");
+    let not_empty = remove_operands(parse_args(["-d", dir + "/d"]).unwrap(), "");
+    expectEq(not_empty.errors[0], i"cannot remove '{$ dir $}/d': Directory not empty", "-d");
+    let empty = remove_operands(parse_args(["-dv", dir + "/empty"]).unwrap(), "");
+    expectEq(empty.status, 0, "-d on an empty directory");
+    expectEq(empty.lines[0], i"removed directory '{$ dir $}/empty'", "-v");
+    expect(!exists(dir + "/empty"), "gone");
+}
+
+func test_recursive(): void {
+    let dir = fresh("tree");
+    let out = remove_operands(parse_args(["-rv", dir + "/d"]).unwrap(), "");
+    expectEq(out.status, 0, "status");
+    expect(!exists(dir + "/d"), "gone");
+    expect(isFile(dir + "/a"), "siblings kept");
+    expectEq(out.lines.len(), 5, "three files and two directories");
+    expectEq(out.lines[4], i"removed directory '{$ dir $}/d'", "the directory last");
+}
+
+func test_no_operands(): void {
+    let none: list[string] = [];
+    let out = remove_operands(parse_args(none).unwrap(), "");
+    expectEq(out.status, 1, "missing operand");
+    expect(out.usage, "with the Try line");
+    expectEq(remove_operands(parse_args(["-f"]).unwrap(), "").status, 0, "-f alone");
+}

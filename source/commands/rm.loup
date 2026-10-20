@@ -1,0 +1,204 @@
+@mode(host.dual)
+
+# rm: removes each operand; with -r whole trees, with -d empty directories.
+#
+# The rule that keeps rm from deleting what it was not asked to: an entry is
+# first *unlinked*. Unlinking removes a file or a symbolic link of any kind
+# (to a file, to a directory, dangling) without following it, and leaves a
+# real directory alone. Only an entry that survives unlinking and passes
+# `is_real_dir` is treated as a directory and descended into. A directory is
+# removed with io.fs.removeDir only once it lists no entries, because the
+# native removeDir is an `rm -rf` that would follow links inside it.
+#
+# Problems are collected; rm carries on with the other entries and operands
+# and exits 1 at the end. Only run_rm prints.
+
+from io.fs import (remove, removeDir, isDir);
+from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
+from cli.args import (Options);
+from commands.fsinfo import (join_path, sorted_names, names_key, entry_present, is_real_dir, is_root_dir, missing_reason);
+from commands.safety import (refusal, last_component, is_dot_or_dotdot, dot_operand_error);
+from commands.quote import (quote);
+
+# What rm has to say: -v lines for standard output, messages for standard
+# error (without the `rm: ` prefix), the exit status, and whether a usage
+# error asks for the "Try 'rm --help'" line.
+pub struct Outcome {
+    pub lines: list[string];
+    pub errors: list[string];
+    pub status: int;
+    pub usage: bool;
+}
+
+# The facts every step needs: the options, the working directory ($PWD) and
+# the names in `/` (for is_root_dir).
+pub struct Context {
+    pub opts: Options;
+    pub cwd: string;
+    pub root_key: string;
+}
+
+func ok(): Outcome {
+    let none: list[string] = [];
+    let no_errors: list[string] = [];
+    return Outcome(lines = none, errors = no_errors, status = EXIT_OK, usage = false);
+}
+
+func failed(msg: string): Outcome {
+    let none: list[string] = [];
+    return Outcome(lines = none, errors = [msg], status = EXIT_FAILURE, usage = false);
+}
+
+func failed_all(msgs: list[string]): Outcome {
+    let none: list[string] = [];
+    return Outcome(lines = none, errors = msgs, status = EXIT_FAILURE, usage = false);
+}
+
+func done(line: string, verbose: bool): Outcome {
+    let no_errors: list[string] = [];
+    var lines: list[string] = [];
+    if (verbose) {
+        lines.push(line);
+    }
+    return Outcome(lines = lines, errors = no_errors, status = EXIT_OK, usage = false);
+}
+
+# `a` followed by `b`.
+pub func combine(a: Outcome, b: Outcome): Outcome {
+    var lines: list[string] = [];
+    var errors: list[string] = [];
+    for (l in a.lines) {
+        lines.push(l);
+    }
+    for (l in b.lines) {
+        lines.push(l);
+    }
+    for (e in a.errors) {
+        errors.push(e);
+    }
+    for (e in b.errors) {
+        errors.push(e);
+    }
+    let status = if (a.status != EXIT_OK) { a.status } else { b.status };
+    return Outcome(lines = lines, errors = errors, status = status, usage = a.usage or b.usage);
+}
+
+func unlink_entry(path: string): void {
+    try {
+        remove(path);
+    } catch (IoError as e) {
+        # Whether it worked is checked by looking for the entry.
+        return;
+    }
+}
+
+# Removes the directory `path`, which must list no entries.
+func remove_empty_dir(path: string, ctx: Context): Outcome {
+    try {
+        removeDir(path);
+    } catch (IoError as e) {
+        # Checked below.
+    }
+    if (!entry_present(path)) {
+        return done(i"removed directory {$ quote(path) $}", ctx.opts.verbose);
+    }
+    # `link/` leads to a directory but names a link, which rmdir refuses.
+    let reason = if (path.endsWith("/") and !is_real_dir(path.slice(0, path.len() - 1))) {
+        "Not a directory"
+    } else {
+        "Permission denied"
+    };
+    return failed(i"cannot remove {$ quote(path) $}: {$ reason $}");
+}
+
+# Removes the contents of the real directory `path`, depth first in name
+# order, then the directory itself. If anything inside could not be removed,
+# the directory is left without a further message, as GNU rm does.
+pub func remove_tree(path: string, ctx: Context): Outcome {
+    if (ctx.opts.preserve_root and is_root_dir(path, ctx.cwd, ctx.root_key)) {
+        return failed_all(refusal(path, ctx.opts, true));
+    }
+    var result = ok();
+    for (name in sorted_names(path)) {
+        result = combine(result, remove_entry(join_path(path, name), ctx));
+    }
+    if (result.status != EXIT_OK) {
+        return result;
+    }
+    if (sorted_names(path).len() > 0) {
+        return combine(result, failed(i"cannot remove {$ quote(path) $}: Directory not empty"));
+    }
+    return combine(result, remove_empty_dir(path, ctx));
+}
+
+# Removes the directory entry `path`, which is present.
+pub func remove_entry(path: string, ctx: Context): Outcome {
+    unlink_entry(path);
+    if (!entry_present(path)) {
+        return done(i"removed {$ quote(path) $}", ctx.opts.verbose);
+    }
+    if (!isDir(path) or !is_real_dir(path)) {
+        # Unlinking failed, and this is not a directory that rm may enter
+        # (a file, or a link it could not remove): never follow it.
+        return failed(i"cannot remove {$ quote(path) $}: Permission denied");
+    }
+    if (ctx.opts.recursive) {
+        return remove_tree(path, ctx);
+    }
+    if (ctx.opts.dir) {
+        if (sorted_names(path).len() > 0) {
+            return failed(i"cannot remove {$ quote(path) $}: Directory not empty");
+        }
+        return remove_empty_dir(path, ctx);
+    }
+    return failed(i"cannot remove {$ quote(path) $}: Is a directory");
+}
+
+# Everything rm does for the parsed options; `cwd` is the working directory
+# ($PWD, or "" if unknown).
+pub func remove_operands(opts: Options, cwd: string): Outcome {
+    if (opts.operands.len() == 0) {
+        if (opts.force) {
+            return ok();
+        }
+        let none: list[string] = [];
+        return Outcome(lines = none, errors = ["missing operand"], status = EXIT_FAILURE, usage = true);
+    }
+
+    let ctx = Context(opts = opts, cwd = cwd, root_key = names_key("/"));
+    var result = ok();
+    for (op in opts.operands) {
+        let refused = refusal(op, opts, is_root_dir(op, cwd, ctx.root_key));
+        if (refused.len() > 0) {
+            result = combine(result, failed_all(refused));
+            continue;
+        }
+        if (!entry_present(op)) {
+            if (!opts.force) {
+                result = combine(result, failed(i"cannot remove {$ quote(op) $}: {$ missing_reason(op) $}"));
+            }
+            continue;
+        }
+        if (is_dot_or_dotdot(last_component(op)) and isDir(op)) {
+            let empty = sorted_names(op).len() == 0;
+            result = combine(result, failed(dot_operand_error(op, opts, empty)));
+            continue;
+        }
+        result = combine(result, remove_entry(op, ctx));
+    }
+    return result;
+}
+
+pub func run_rm(opts: Options): int {
+    let outcome = remove_operands(opts, env("PWD") ?? "");
+    for (line in outcome.lines) {
+        println(line);
+    }
+    for (msg in outcome.errors) {
+        printErr(i"{$ APP_NAME $}: {$ msg $}");
+    }
+    if (outcome.usage) {
+        printErr(i"Try '{$ APP_NAME $} --help' for more information.");
+    }
+    return outcome.status;
+}

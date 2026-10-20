@@ -1,0 +1,58 @@
+@mode(host.dual)
+
+# The guards GNU rm applies to each operand before touching it, as pure
+# functions: the facts that need the file system (is it the root directory?)
+# are passed in, so every rule is unit-tested without deleting anything.
+
+from cli.args import (Options);
+from commands.quote import (quote);
+
+# The last component of a path, ignoring trailing slashes (`a/b/` → `b`,
+# `/` → ``).
+pub func last_component(path: string): string {
+    var p = path;
+    while (p.len() > 0 and p.endsWith("/")) {
+        p = p.slice(0, p.len() - 1);
+    }
+    let parts = p.split("/");
+    return parts[parts.len() - 1];
+}
+
+pub func is_dot_or_dotdot(name: string): bool {
+    return name == "." or name == "..";
+}
+
+# The messages that make rm skip `op` before looking at it, or an empty
+# list. With -r, rm refuses `.` and `..` (in any spelling such as `d/..`)
+# and, unless --no-preserve-root, the root directory.
+pub func refusal(op: string, opts: Options, is_root: bool): list[string] {
+    var msgs: list[string] = [];
+    if (!opts.recursive) {
+        return msgs;
+    }
+    if (is_dot_or_dotdot(last_component(op))) {
+        msgs.push(i"refusing to remove '.' or '..' directory: skipping {$ quote(op) $}");
+        return msgs;
+    }
+    if (opts.preserve_root and is_root) {
+        if (op == "/") {
+            msgs.push("it is dangerous to operate recursively on '/'");
+        } else {
+            msgs.push(i"it is dangerous to operate recursively on {$ quote(op) $} (same as '/')");
+        }
+        msgs.push("use --no-preserve-root to override this failsafe");
+    }
+    return msgs;
+}
+
+# What rm says about a directory operand named `.` or `..` (or `d/..`)
+# without -r: it is never removed. `empty` says whether it lists no entries.
+pub func dot_operand_error(op: string, opts: Options, empty: bool): string {
+    if (!opts.dir) {
+        return i"cannot remove {$ quote(op) $}: Is a directory";
+    }
+    if (empty) {
+        return i"cannot remove {$ quote(op) $}: Invalid argument";
+    }
+    return i"cannot remove {$ quote(op) $}: Directory not empty";
+}

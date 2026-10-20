@@ -1,45 +1,71 @@
 @mode(host.dual)
 
-# Command-line parsing. Loup 1.26 has no CLI library, so arguments are
-# parsed by hand into an Options value.
-#
-# Grammar: [OPTIONS] COMMAND [OPERANDS...]
-#   Options may appear anywhere before `--`; everything after `--` is an
-#   operand. Value options accept `--name VALUE` and `--name=VALUE`.
-
-pub const DEFAULT_GREETING: string = "Hello";
+# Command-line parsing for rm, following GNU getopt_long: options may appear
+# anywhere among the operands, short options combine (`-rfv`), `--` ends the
+# options (so `rm -- -f` removes a file named -f), and a long option may be
+# abbreviated to any unambiguous prefix.
 
 pub struct Options {
-    pub command: string;
-    pub operands: list[string];
     pub help: bool;
     pub version: bool;
+    # -f: ignore missing operands, and succeed with no operands at all.
+    pub force: bool;
+    # -r, -R: remove directories and their contents.
+    pub recursive: bool;
+    # -d: remove empty directories.
+    pub dir: bool;
     pub verbose: bool;
-    pub shout: bool;
-    pub greeting: string;
+    # --preserve-root (the default): refuse to work recursively on `/`.
+    pub preserve_root: bool;
+    pub operands: list[string];
+}
+
+# In the order of GNU rm's option table, which its "ambiguous" message
+# follows.
+const LONG_OPTIONS: string = "force no-preserve-root preserve-root recursive dir verbose help version";
+
+# Resolves a long option name, which may be an unambiguous prefix. An empty
+# error means "unrecognized".
+pub func match_long(name: string): Result[string, string] {
+    var matches: list[string] = [];
+    for (opt in LONG_OPTIONS.split(" ")) {
+        if (opt == name) {
+            return Ok(opt);
+        }
+        if (opt.startsWith(name)) {
+            matches.push(opt);
+        }
+    }
+    if (matches.len() == 1) {
+        return Ok(matches[0]);
+    }
+    if (matches.len() == 0) {
+        return Err("");
+    }
+    var quoted: list[string] = [];
+    for (m in matches) {
+        quoted.push(i"'--{$ m $}'");
+    }
+    return Err(i"option '--{$ name $}' is ambiguous; possibilities: {$ quoted.join(" ") $}");
 }
 
 pub func parse_args(argv: list[string]): Result[Options, string] {
-    var command = "";
-    var operands: list[string] = [];
     var help = false;
     var version = false;
+    var force = false;
+    var recursive = false;
+    var dir = false;
     var verbose = false;
-    var shout = false;
-    var greeting = DEFAULT_GREETING;
-    var only_operands = false;
+    var preserve_root = true;
+    var operands: list[string] = [];
 
     var i = 0;
+    var only_operands = false;
     while (i < argv.len()) {
         let arg = argv[i];
         i += 1;
-
         if (only_operands or arg == "-" or !arg.startsWith("-")) {
-            if (command.is_empty()) {
-                command = arg;
-            } else {
-                operands.push(arg);
-            }
+            operands.push(arg);
             continue;
         }
         if (arg == "--") {
@@ -47,52 +73,73 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
             continue;
         }
 
-        # Split `--name=value` into its name and inline value.
-        var name = arg;
-        var inline_value: Option[string] = None;
-        if (arg.startsWith("--") and arg.contains("=")) {
-            let parts = arg.split("=");
-            name = parts[0];
-            inline_value = Some(parts.slice(1).join("="));
-        }
-
-        if (name == "-g" or name == "--greeting") {
-            match inline_value {
-                Some(v) => { greeting = v; },
-                None => {
-                    if (i >= argv.len()) {
-                        return Err(i"option '{$ name $}' requires a value");
+        if (arg.startsWith("--")) {
+            let body = arg.slice(2);
+            let eq = body.index_of("=");
+            let name = if (eq >= 0) { body.slice(0, eq) } else { body };
+            let long = match match_long(name) {
+                Ok(found) => found,
+                Err(msg) => {
+                    if (msg.len() > 0) {
+                        return Err(msg);
                     }
-                    greeting = argv[i];
-                    i += 1;
+                    return Err(i"unrecognized option '{$ arg $}'");
                 },
+            };
+            if (long == "preserve-root" and eq >= 0) {
+                # GNU's --preserve-root=all also refuses operands on other
+                # file systems, which cannot be detected here; it is accepted
+                # and acts like --preserve-root.
+                let value = body.slice(eq + 1);
+                if (value != "all") {
+                    return Err(i"unrecognized --preserve-root argument: '{$ value $}'");
+                }
+                preserve_root = true;
+            } else if (eq >= 0) {
+                return Err(i"option '--{$ long $}' doesn't allow an argument");
+            } else if (long == "force") {
+                force = true;
+            } else if (long == "no-preserve-root") {
+                preserve_root = false;
+            } else if (long == "preserve-root") {
+                preserve_root = true;
+            } else if (long == "recursive") {
+                recursive = true;
+            } else if (long == "dir") {
+                dir = true;
+            } else if (long == "verbose") {
+                verbose = true;
+            } else if (long == "help") {
+                help = true;
+            } else {
+                version = true;
             }
             continue;
         }
 
-        if (inline_value.is_some()) {
-            return Err(i"option '{$ name $}' does not take a value");
-        }
-        if (name == "-h" or name == "--help") {
-            help = true;
-        } else if (name == "-V" or name == "--version") {
-            version = true;
-        } else if (name == "-v" or name == "--verbose") {
-            verbose = true;
-        } else if (name == "--shout") {
-            shout = true;
-        } else {
-            return Err(i"unknown option '{$ name $}'");
+        for (ch in arg.slice(1)) {
+            if (ch == "f") {
+                force = true;
+            } else if (ch == "r" or ch == "R") {
+                recursive = true;
+            } else if (ch == "d") {
+                dir = true;
+            } else if (ch == "v") {
+                verbose = true;
+            } else {
+                return Err(i"invalid option -- '{$ ch $}'");
+            }
         }
     }
 
     return Ok(Options(
-        command = command,
-        operands = operands,
         help = help,
         version = version,
+        force = force,
+        recursive = recursive,
+        dir = dir,
         verbose = verbose,
-        shout = shout,
-        greeting = greeting,
+        preserve_root = preserve_root,
+        operands = operands,
     ));
 }

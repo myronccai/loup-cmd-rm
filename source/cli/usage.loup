@@ -1,28 +1,36 @@
 @mode(host.dual)
 
-from appinfo import (APP_NAME, APP_VERSION, APP_SUMMARY);
-from cli.args import (DEFAULT_GREETING);
+from appinfo import (APP_NAME, APP_VERSION);
 
 pub func usage(): string {
     let lines = [
-        i"usage: {$ APP_NAME $} [OPTIONS] COMMAND [ARGS...]",
+        i"Usage: {$ APP_NAME $} [OPTION]... [FILE]...",
+        "Remove (unlink) the FILE(s).",
         "",
-        APP_SUMMARY,
+        "  -f, --force           ignore nonexistent files and arguments",
+        "      --no-preserve-root  do not treat '/' specially",
+        "      --preserve-root[=all]  do not remove '/' (default)",
+        "  -r, -R, --recursive   remove directories and their contents recursively",
+        "  -d, --dir             remove empty directories",
+        "  -v, --verbose         explain what is being done",
+        "      --help        display this help and exit",
+        "      --version     output version information and exit",
         "",
-        "Commands:",
-        "  hello [NAME]          Print a greeting (NAME defaults to 'world')",
-        "  help                  Show this help",
+        "By default, rm does not remove directories.  Use the --recursive (-r or -R)",
+        "option to remove each listed directory, too, along with all of its contents.",
         "",
-        "Options:",
-        i"  -g, --greeting TEXT   Greeting used by 'hello' (default: {$ DEFAULT_GREETING $})",
-        "      --shout           Print the greeting in upper case",
-        "  -v, --verbose         Print diagnostic messages to stderr",
-        "  -h, --help            Show this help and exit",
-        "  -V, --version         Show the version and exit",
+        "Symbolic links are removed, never followed. rm never asks for",
+        "confirmation (there is no -i or -I).",
+        "",
+        "To remove a file whose name starts with a '-', for example '-foo',",
+        "use one of these commands:",
+        i"  {$ APP_NAME $} -- -foo",
+        "",
+        i"  {$ APP_NAME $} ./-foo",
     ];
     return lines.join("\n");
 }
 
 pub func version_line(): string {
-    return i"{$ APP_NAME $} {$ APP_VERSION $}";
+    return i"{$ APP_NAME $} (loup-cmd-{$ APP_NAME $}) {$ APP_VERSION $}";
 }
