@@ -14,8 +14,11 @@
 # - The root directory is the one directory whose `..` is itself:
 #   `is_root_dir`.
 #
-# The native build's io.fs never throws (a missing directory lists as empty);
-# the Stage0 interpreter used by `make test` throws IoError. Both are handled.
+# Runtime: host.dual. Compiled into the native binary build/rm by
+# `make build`; `loup run source/main.loup` interprets the same code (where
+# listDir leaves out dot-files). The native build's io.fs never throws (a
+# missing directory lists as empty); the Stage0 interpreter used by
+# `make test` throws IoError. Both are handled.
 
 from io.fs import (exists, isDir, listDir);
 from io.path import (basename, dirname, isAbsolute, normalize);

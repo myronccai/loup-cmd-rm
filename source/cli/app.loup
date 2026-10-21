@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# The command-line driver of rm: parses argv, answers --help and --version,
+# runs the removal and returns the exit status (1 for any failure, usage
+# errors included, as in GNU rm).
+#
+# Runtime: host.dual. Compiled into the native binary build/rm by
+# `make build`; `loup run source/main.loup` interprets the same code, and
+# tests/app_test.loup calls run() directly under Stage0 (`make test`).
+
 from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
 from cli.args import (parse_args);
 from cli.usage import (usage, version_line);

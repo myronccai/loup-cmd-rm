@@ -1,7 +1,12 @@
 @mode(host.dual)
 
-# The operand guards, with "is it the root directory?" given directly, and
-# is_root_dir itself (which only looks, never deletes).
+# Unit tests for the operand guards (source/commands/safety.loup), with "is
+# it the root directory?" given directly, and is_root_dir itself (which only
+# looks, never deletes).
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test`, source/ on LOUPPATH), one test per
+# `func test_*()`. It is not part of the binary.
 
 from debug.assert import (expect, expectEq);
 from cli.args import (parse_args);

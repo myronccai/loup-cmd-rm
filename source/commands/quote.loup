@@ -4,6 +4,9 @@
 # shell-escape-always style): 'name', or "name" when the name holds a single
 # quote and nothing a double-quoted shell string would expand, otherwise
 # single quotes with each ' written as '\''.
+#
+# Runtime: host.dual. Compiled into the native binary build/rm by
+# `make build`; `loup run source/main.loup` interprets the same code.
 
 const DOUBLE_QUOTE_SPECIALS: string = "\"$`\\";
 

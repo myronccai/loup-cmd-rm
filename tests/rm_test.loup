@@ -1,8 +1,13 @@
 @mode(host.dual)
 
-# Removals inside .temp/rm-unit/ (git-ignored; the tests run from the
-# repository root). Each test builds its own directory; nothing outside
-# .temp/rm-unit/ is ever named.
+# Unit tests for removals inside .temp/rm-unit/ (git-ignored; the tests run
+# from the repository root). Each test builds its own directory; nothing
+# outside .temp/rm-unit/ is ever named.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test`, source/ on LOUPPATH), one test per
+# `func test_*()`, so the removals go through Stage0's io.fs, which throws
+# IoError on failure. It is not part of the binary.
 
 from debug.assert import (expect, expectEq);
 from io.fs import (createDir, exists, isDir, isFile, removeDir, writeText);

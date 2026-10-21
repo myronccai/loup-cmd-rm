@@ -12,6 +12,21 @@
 #
 # Problems are collected; rm carries on with the other entries and operands
 # and exits 1 at the end. Only run_rm prints.
+#
+# Runtime: host.dual. Compiled into the native binary build/rm by
+# `make build`, which `make e2e` tests in a temporary directory; the rule
+# above holds there. `loup run source/main.loup` interprets the same code,
+# but there io.fs runs the system's `rm -f` and `rm -rf` and listDir hides
+# dot-files, so a directory that "lists no entries" may still hold some
+# when removeDir deletes it. tests/rm_test.loup removes only inside .temp/
+# under Stage0 (`make test`).
+#
+# Structure: Outcome values and combine() (results are collected, never
+# printed on the way), then the removal from the bottom up: unlink_entry,
+# remove_empty_dir, remove_tree (depth first, which calls remove_entry for
+# each name), remove_entry (unlink first, descend only into a real
+# directory). remove_operands applies the safety guards to each operand and
+# removes it; run_rm prints the Outcome.
 
 from io.fs import (remove, removeDir, isDir);
 from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
