@@ -12,7 +12,7 @@
 from debug.assert import (expect, expectEq);
 from io.fs import (createDir, exists, isDir, isFile, removeDir, writeText);
 from cli.args import (parse_args);
-from commands.rm import (remove_operands);
+from commands.rm import (Outcome, remove_operands);
 
 func fresh(name: string): string {
     let dir = ".temp/rm-unit/" + name;
@@ -77,4 +77,27 @@ func test_no_operands(): void {
     expectEq(out.status, 1, "missing operand");
     expect(out.usage, "with the Try line");
     expectEq(remove_operands(parse_args(["-f"]).unwrap(), "").status, 0, "-f alone");
+}
+
+# A directory that holds only dot-files is not empty: `-d` refuses it.
+func test_dot_files_count_as_entries(): void {
+    let dir = fresh("dots");
+    writeText(dir + "/empty/.only", "o\n");
+    let out = remove_operands(parse_args(["-d", dir + "/empty"]).unwrap(), "");
+    expectEq(out.status, 1, "status");
+    expectEq(out.errors[0], i"cannot remove '{$ dir $}/empty': Directory not empty", "-d");
+    expect(isFile(dir + "/empty/.only"), "kept");
+}
+
+func test_outcomes_add_up(): void {
+    let none: list[string] = [];
+    let a = Outcome(lines = ["one"], errors = none, status = 0, usage = false);
+    let b = Outcome(lines = none, errors = ["bad"], status = 1, usage = true);
+    let c = Outcome(lines = ["two"], errors = ["worse"], status = 0, usage = false);
+    let sum = a + b + c;
+    expectEq(sum.lines.join("|"), "one|two", "lines in order");
+    expectEq(sum.errors.join("|"), "bad|worse", "errors in order");
+    expectEq(sum.status, 1, "the first failure wins");
+    expect(sum.usage, "the Try line is kept");
+    expectEq((a + a).status, 0, "success stays success");
 }

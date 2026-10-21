@@ -15,10 +15,10 @@
 #   `is_root_dir`.
 #
 # Runtime: host.dual. Compiled into the native binary build/rm by
-# `make build`; `loup run source/main.loup` interprets the same code (where
-# listDir leaves out dot-files). The native build's io.fs never throws (a
-# missing directory lists as empty); the Stage0 interpreter used by
-# `make test` throws IoError. Both are handled.
+# `make build`; Stage0 interprets the same code for `make run` and
+# `make test`. The native build's io.fs never throws (a missing directory
+# lists as empty); Stage0 throws IoError. Both are handled. (The
+# self-hosted `loup run`, whose listDir leaves out dot-files, is not used.)
 
 from io.fs import (exists, isDir, listDir);
 from io.path import (basename, dirname, isAbsolute, normalize);
@@ -39,7 +39,7 @@ pub func sorted_names(path: string): list[string] {
         for (name in listDir(path)) {
             out.push(name);
         }
-    } catch (IoError as e) {
+    } catch (IoError) {
         return out;
     }
     out.sort(func(a: string, b: string): int { return a.compareTo(b); });

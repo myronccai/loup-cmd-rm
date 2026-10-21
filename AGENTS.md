@@ -53,7 +53,7 @@ Loup Lite comes from <https://github.com/code-craft-ai-company/loup-releases>;
 
 | Task | Command | Notes |
 |------|---------|-------|
-| Run from source | `make run ARGS="-rv build/scratch"` | `loup run source/main.loup -- ARGS` |
+| Run from source | `make run ARGS="-rv build/scratch"` | `loup-bootstrap run source/main.loup -- ARGS` (Stage0; see below) |
 | Type-check | `make check` | checks `source/main.loup` and every module it imports; tests are not checked |
 | Run all tests | `make test` | every `tests/*_test.loup` |
 | Run matching tests | `make test TEST_ARGS="--filter value"` | tests whose name contains `value` |
@@ -119,8 +119,11 @@ exit status) so unit tests can check it; only `run_rm` prints.
   `rename`, `open`, `stat`, ...): natively it captures the runtime's call (a
   helper named `unlink` made every removal segfault). Do not import `rename`
   from `io.fs` for the same reason.
-- Under the self-hosted `loup run` (`make run`), `io.fs.remove` runs the
-  system `rm`, which prints its own message when it meets a directory.
+- Do not run rm from source with the self-hosted `loup run`: there
+  `listDir` hides dot-files and `io.fs.remove`/`removeDir` run the system's
+  `rm -f`/`rm -rf`, so `rm -d DIR` deleted a directory holding only
+  dot-files. `make run` uses Stage0 (`loup-bootstrap run`), which lists
+  every entry and removes without a shell, like the native binary.
 - Read the environment with the prelude `env("NAME")`; `system.env.get` and
   the `system.text` functions do not link natively.
 - The skill's examples use the `loup init` layout (`src/`, `tests/`, and

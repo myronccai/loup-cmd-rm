@@ -14,14 +14,15 @@
 # and exits 1 at the end. Only run_rm prints.
 #
 # Runtime: host.dual. Compiled into the native binary build/rm by
-# `make build`, which `make e2e` tests in a temporary directory; the rule
-# above holds there. `loup run source/main.loup` interprets the same code,
-# but there io.fs runs the system's `rm -f` and `rm -rf` and listDir hides
-# dot-files, so a directory that "lists no entries" may still hold some
-# when removeDir deletes it. tests/rm_test.loup removes only inside .temp/
-# under Stage0 (`make test`).
+# `make build`, which `make e2e` tests in a temporary directory, and
+# interpreted by Stage0 for `make run`; the rule above holds in both. It
+# does not hold under the self-hosted `loup run`, whose io.fs runs the
+# system's `rm -f` and `rm -rf` and whose listDir hides dot-files (a
+# directory that "lists no entries" may still hold some), which is why
+# `make run` does not use it. tests/rm_test.loup removes only inside
+# .temp/ under Stage0 (`make test`).
 #
-# Structure: Outcome values and combine() (results are collected, never
+# Structure: the Outcome struct, whose `+` collects results (nothing is
 # printed on the way), then the removal from the bottom up: unlink_entry,
 # remove_empty_dir, remove_tree (depth first, which calls remove_entry for
 # each name), remove_entry (unlink first, descend only into a real
@@ -38,11 +39,21 @@ from commands.quote import (quote);
 # What rm has to say: -v lines for standard output, messages for standard
 # error (without the `rm: ` prefix), the exit status, and whether a usage
 # error asks for the "Try 'rm --help'" line.
-pub struct Outcome {
+#
+# Outcomes add up: `a + b` is `a` followed by `b` (lines and errors in
+# order, the first failing status wins). That is how the results of the
+# entries of a tree and of the operands are collected.
+pub struct Outcome implements Add[Outcome, Outcome] {
     pub lines: list[string];
     pub errors: list[string];
     pub status: int;
     pub usage: bool;
+
+    operator func +(other: Outcome): Outcome {
+        let status = if (this.status != EXIT_OK) { this.status } else { other.status };
+        return Outcome(lines = this.lines + other.lines, errors = this.errors + other.errors,
+            status = status, usage = this.usage or other.usage);
+    }
 }
 
 # The facts every step needs: the options, the working directory ($PWD) and
@@ -78,30 +89,10 @@ func done(line: string, verbose: bool): Outcome {
     return Outcome(lines = lines, errors = no_errors, status = EXIT_OK, usage = false);
 }
 
-# `a` followed by `b`.
-pub func combine(a: Outcome, b: Outcome): Outcome {
-    var lines: list[string] = [];
-    var errors: list[string] = [];
-    for (l in a.lines) {
-        lines.push(l);
-    }
-    for (l in b.lines) {
-        lines.push(l);
-    }
-    for (e in a.errors) {
-        errors.push(e);
-    }
-    for (e in b.errors) {
-        errors.push(e);
-    }
-    let status = if (a.status != EXIT_OK) { a.status } else { b.status };
-    return Outcome(lines = lines, errors = errors, status = status, usage = a.usage or b.usage);
-}
-
 func unlink_entry(path: string): void {
     try {
         remove(path);
-    } catch (IoError as e) {
+    } catch (IoError) {
         # Whether it worked is checked by looking for the entry.
         return;
     }
@@ -111,7 +102,7 @@ func unlink_entry(path: string): void {
 func remove_empty_dir(path: string, ctx: Context): Outcome {
     try {
         removeDir(path);
-    } catch (IoError as e) {
+    } catch (IoError) {
         # Checked below.
     }
     if (!entry_present(path)) {
@@ -135,15 +126,15 @@ pub func remove_tree(path: string, ctx: Context): Outcome {
     }
     var result = ok();
     for (name in sorted_names(path)) {
-        result = combine(result, remove_entry(join_path(path, name), ctx));
+        result = result + remove_entry(join_path(path, name), ctx);
     }
     if (result.status != EXIT_OK) {
         return result;
     }
     if (sorted_names(path).len() > 0) {
-        return combine(result, failed(i"cannot remove {$ quote(path) $}: Directory not empty"));
+        return result + failed(i"cannot remove {$ quote(path) $}: Directory not empty");
     }
-    return combine(result, remove_empty_dir(path, ctx));
+    return result + remove_empty_dir(path, ctx);
 }
 
 # Removes the directory entry `path`, which is present.
@@ -176,8 +167,7 @@ pub func remove_operands(opts: Options, cwd: string): Outcome {
         if (opts.force) {
             return ok();
         }
-        let none: list[string] = [];
-        return Outcome(lines = none, errors = ["missing operand"], status = EXIT_FAILURE, usage = true);
+        return failed("missing operand") with (usage = true);
     }
 
     let ctx = Context(opts = opts, cwd = cwd, root_key = names_key("/"));
@@ -185,21 +175,21 @@ pub func remove_operands(opts: Options, cwd: string): Outcome {
     for (op in opts.operands) {
         let refused = refusal(op, opts, is_root_dir(op, cwd, ctx.root_key));
         if (refused.len() > 0) {
-            result = combine(result, failed_all(refused));
+            result = result + failed_all(refused);
             continue;
         }
         if (!entry_present(op)) {
             if (!opts.force) {
-                result = combine(result, failed(i"cannot remove {$ quote(op) $}: {$ missing_reason(op) $}"));
+                result = result + failed(i"cannot remove {$ quote(op) $}: {$ missing_reason(op) $}");
             }
             continue;
         }
         if (is_dot_or_dotdot(last_component(op)) and isDir(op)) {
             let empty = sorted_names(op).len() == 0;
-            result = combine(result, failed(dot_operand_error(op, opts, empty)));
+            result = result + failed(dot_operand_error(op, opts, empty));
             continue;
         }
-        result = combine(result, remove_entry(op, ctx));
+        result = result + remove_entry(op, ctx);
     }
     return result;
 }

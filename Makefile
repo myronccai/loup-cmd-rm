@@ -17,9 +17,14 @@ TEST_ARGS      ?=
 
 all: build
 
-# Run from source, e.g. `make run ARGS="-rv build/scratch"`.
+# Run from source, e.g. `make run ARGS="-rv build/scratch"`. This uses
+# Stage0's interpreter: under the self-hosted `loup run` of Loup 1.26.0,
+# io.fs.listDir leaves out dot-files and remove/removeDir run the system's
+# `rm -f`/`rm -rf`, so a directory that seems empty can still hold
+# dot-files when it is deleted (`rm -d` removed such a directory). Stage0
+# lists every entry and removes without a shell, as the native binary does.
 run:
-	$(LOUP) run source/main.loup -- $(ARGS)
+	$(LOUP_BOOTSTRAP) run source/main.loup -- $(ARGS)
 
 # Type-check source/main.loup and every module it imports.
 check:

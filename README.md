@@ -69,7 +69,7 @@ license: <https://code-craft.ai/loup/license>.
 ```sh
 make build                       # native binary: build/rm
 make ci                          # check, unit tests, build, end-to-end tests
-make run ARGS="-rv build/scratch"  # run from source with loup run
+make run ARGS="-rv build/scratch"  # run from source (Stage0's loup-bootstrap run)
 ```
 
 In a directory holding `notes.txt`, an empty `docs/`, `shared/data` and

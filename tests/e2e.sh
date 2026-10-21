@@ -24,6 +24,7 @@ echo keep > "$TMP/sentinel"
 #   a b            files
 #   d/  x .h sub/y a directory to remove
 #   e/             an empty directory
+#   dots/ .only    a directory holding only a dot-file
 #   target/  t inner/i       the target of lnk
 #   lnk -> target            a link to a sibling directory
 #   outside/keep/k           the target of the links below
@@ -38,7 +39,8 @@ setup() {
     mkdir -p "$TOP"
     echo keep > "$TMP/w/sentinel"
     cd "$TOP" || exit 1
-    mkdir -p d/sub e target/inner outside/keep nest ro roln
+    mkdir -p d/sub e dots target/inner outside/keep nest ro roln
+    echo O > dots/.only
     echo A > a
     echo B > b
     echo X > d/x
@@ -186,6 +188,9 @@ rm: refusing to remove '.' or '..' directory: skipping 'd/.'
 rm: refusing to remove '.' or '..' directory: skipping './'" -rf . .. d/.. d/. ./
 tree_is  "-r dots: nothing removed" $'a: A\nd/\nd/.h: H\nd/sub/\nd/sub/y: Y\nd/x: X' a d
 run_case "-d dot"              1 '' "rm: cannot remove '.': Directory not empty" -d .
+run_case "-d dot-files only"   1 '' "rm: cannot remove 'dots': Directory not empty" -d dots
+tree_is  "-d dot-files kept"   $'dots/\ndots/.only: O' dots
+run_case "-r dot-files only"   0 $'removed \'dots/.only\'\nremoved directory \'dots\'\n' '' -rv dots
 run_case "dot"                 1 '' "rm: cannot remove '.': Is a directory" .
 
 # Options
